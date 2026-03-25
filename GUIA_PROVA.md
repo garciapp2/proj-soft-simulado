@@ -140,63 +140,157 @@ Passo a passo do Dockerfile:
 
 Ir em: **Settings → Secrets and variables → Actions → New repository secret**
 
-| Secret Name      | Valor                                            |
-|------------------|--------------------------------------------------|
-| DOCKER_USER      | seu usuário do Docker Hub                        |
-| DOCKERHUB_TOKEN  | token de acesso do Docker Hub                    |
-| HOST_TEST        | IP da AWS (ex: 18.230.76.235)                    |
-| KEY_TEST         | chave SSH privada (.pem) para acessar a AWS      |
-| MONGO_URL        | mongodb://mongo-connections:27017 (nome do container na rede) |
-| USER_API_URL     | http://app_users:5000 (nome do container na rede)|
+| Secret Name      | Valor                                            | Como descobrir                         |
+|------------------|--------------------------------------------------|----------------------------------------|
+| DOCKER_USER      | seu usuário do Docker Hub                        | É o teu login do Docker Hub            |
+| DOCKERHUB_TOKEN  | token de acesso do Docker Hub                    | Docker Hub → Account Settings → Security → New Access Token |
+| HOST_TEST        | IP da AWS (ex: 18.230.76.235)                    | Professor fornece                      |
+| KEY_TEST         | chave SSH privada (.pem) para acessar a AWS      | Professor fornece o arquivo .pem, colar o conteúdo inteiro |
+| MONGO_URL        | mongodb://NOME-CONTAINER-MONGO:27017             | Entrar na AWS, rodar `docker ps`, olhar coluna NAMES do container mongo |
+| USER_API_URL     | http://NOME-CONTAINER-USERS:PORTA-INTERNA        | Entrar na AWS, rodar `docker ps`, olhar coluna NAMES do container da API de users |
+
+**IMPORTANTE:** Os valores de MONGO_URL e USER_API_URL dependem dos NOMES dos containers que **já estão rodando na AWS dos outros projetos**. A tua API de posts vai usar o MongoDB e a API de usuários que já existem lá. Você PRECISA entrar na AWS com SSH e rodar `docker ps` para ver os nomes certos.
+
+Na prova, entra na AWS, roda `docker ps`, e usa os nomes que aparecerem lá.
+
+Se colocar o nome errado, a API vai dar erro 500. Para corrigir: atualizar o secret no GitHub e re-rodar o pipeline (Actions → clicar no run → Re-run all jobs).
 
 ---
 
-## PARTE 7 — INFRAESTRUTURA NA AWS (Rodar antes do deploy)
+## PARTE 7 — ENTRAR NA AWS E VERIFICAR TUDO
 
-### Criar a rede Docker (se ainda não existe)
+### Como entrar na AWS
+```bash
+ssh -i "caminho/da/chave.pem" ubuntu@IP_DA_AWS
+```
+No Windows, se der erro de permissão no .pem: botão direito no arquivo → Propriedades → Segurança → Avançado → Desabilitar herança → remover todos exceto o seu usuário.
+
+### PRIMEIRO PASSO ao entrar: rodar `docker ps`
+Isso mostra todos os containers rodando. Você precisa anotar:
+1. O NOME do container do MongoDB → vai no secret MONGO_URL
+2. O NOME do container da API de usuários → vai no secret USER_API_URL
+
+### Comandos essenciais dentro da AWS
+
+**Ver todos os containers rodando (MAIS IMPORTANTE):**
+```bash
+docker ps
+```
+Mostra NAMES (nome dos containers), PORTS (portas) e IMAGE (imagem). Usar os NAMES para configurar os secrets MONGO_URL e USER_API_URL.
+
+**Ver containers parados também:**
+```bash
+docker ps -a
+```
+
+**Ver logs de um container (para debugar erros):**
+```bash
+docker logs posts-api
+docker logs posts-api --tail 50
+```
+
+**Ver quais containers estão numa rede:**
+```bash
+docker network inspect rede
+```
+
+**Ver redes Docker que existem:**
+```bash
+docker network ls
+```
+
+**Criar a rede Docker (se não existe):**
 ```bash
 docker network create -d bridge rede
 ```
 
-### Subir o MongoDB (se ainda não existe)
+**Subir o MongoDB (se não existe):**
 ```bash
 docker run -d --network=rede --name mongo-connections -p 27017:27017 mongo:7
 ```
 
-### Verificar que a API de usuários já está rodando
+**Parar e remover um container:**
 ```bash
-docker ps
+docker stop nome-do-container
+docker rm nome-do-container
 ```
-Deve aparecer o container da API de usuários conectado na rede `rede`.
+
+**Rodar um container manualmente (para testar sem pipeline):**
+```bash
+docker run -d -p 8081:5000 -e MONGO_URL=mongodb://NOME-MONGO:27017 -e USER_API_URL=http://NOME-USERS:5000 --network=rede --name posts-api IMAGEM
+```
+
+### Como descobrir os valores certos para os Secrets
+
+1. Entrar na AWS com SSH
+2. Rodar `docker ps`
+3. Olhar a coluna NAMES:
+   - O container do MongoDB → usar o nome no MONGO_URL: `mongodb://NOME:27017`
+   - O container da API de usuários → usar o nome no USER_API_URL: `http://NOME:5000`
+4. Esses nomes funcionam como DNS dentro da rede Docker
+
+### TROUBLESHOOTING - Se der erro 500
+
+1. Entrar na AWS com SSH
+2. Rodar `docker logs posts-api` para ver o erro
+3. Se o erro for **"name resolution"** ou **"ServerSelectionTimeoutError"**: o MONGO_URL está com nome errado. Corrigir o secret no GitHub.
+4. Se o erro for **"Connection refused"** no requests: o USER_API_URL está com nome ou porta errada. Corrigir o secret.
+5. Depois de corrigir o secret: ir em Actions no GitHub → clicar no último run → **Re-run all jobs**
+6. Esperar o pipeline rodar e testar de novo com curl
 
 ---
 
-## PARTE 8 — TESTAR A API
+## PARTE 8 — DESCOBRIR PORTAS LIVRES
+
+### Pelo terminal do Windows (SEM entrar na AWS)
+Testar portas com curl. O tipo de resposta diz tudo:
+- **Timeout** (demora e falha) = porta BLOQUEADA no Security Group
+- **Connection refused** (falha rápido) = porta ABERTA e LIVRE → essa serve!
+- **Responde HTML/JSON** = porta aberta mas JÁ OCUPADA
+
+```bash
+curl.exe -m 3 http://IP:PORTA
+```
+
+Testar as portas comuns: 80, 8080, 8081, 8082, 3000, 5000, 5001, 5002
+
+### Pela AWS (se tiver SSH)
+```bash
+docker ps
+```
+Mostra quais portas já estão mapeadas. Escolher uma que não aparece.
+
+### Se nenhuma porta livre estiver aberta no Security Group
+Abrir no console da AWS:
+1. EC2 → Instances → selecionar instância
+2. Aba Security → clicar no Security Group
+3. Edit inbound rules → Add rule
+4. Type: Custom TCP → Port: a porta que quer → Source: 0.0.0.0/0 → Save
+
+---
+
+## PARTE 9 — TESTAR A API
 
 ### Criar um post (com curl ou Postman):
 ```bash
-curl -X POST http://18.230.76.235:5002/post \
-  -H "Content-Type: application/json" \
-  -H "usuario: ID-DO-USUARIO-AQUI" \
-  -d '{"titulo": "Meu post", "mensagem": "Olá mundo!"}'
+curl.exe -X POST http://IP:PORTA/post -H "Content-Type: application/json" -H "usuario: ID-DO-USUARIO-AQUI" -d "{\"titulo\": \"Meu post\", \"mensagem\": \"Ola mundo\"}"
 ```
 
 ### Listar posts:
 ```bash
-curl http://18.230.76.235:5002/post
+curl.exe http://IP:PORTA/post
 ```
 
 ### Testar com usuário inválido (deve retornar erro 404):
 ```bash
-curl -X POST http://18.230.76.235:5002/post \
-  -H "Content-Type: application/json" \
-  -H "usuario: usuario-que-nao-existe" \
-  -d '{"titulo": "Teste", "mensagem": "Não deveria funcionar"}'
+curl.exe -X POST http://IP:PORTA/post -H "Content-Type: application/json" -H "usuario: id-falso" -d "{\"titulo\": \"Teste\", \"mensagem\": \"Nao deveria funcionar\"}"
 ```
+
+**NOTA Windows:** usar `curl.exe` (não `curl` sozinho) e aspas duplas com `\"` para JSON
 
 ---
 
-## PARTE 9 — FLUXO COMPLETO DE DEPLOY (Resumão)
+## PARTE 10 — FLUXO COMPLETO DE DEPLOY (Resumão)
 
 1. Escrever o código (main.py, requirements.txt, Dockerfile)
 2. Criar o workflow em `.github/workflows/deploy.yml`
@@ -214,7 +308,7 @@ curl -X POST http://18.230.76.235:5002/post \
 
 ## DICAS RÁPIDAS PARA A PROVA
 
-- **Porta da API de posts**: 5002 (externa) → 5000 (interna no container)
+- **Porta da API de posts**: escolher uma livre (testar com curl), interna no container sempre 5000
 - **MongoDB não precisa criar tabela**: ele cria automaticamente quando você insere
 - **Header do usuário**: o campo `usuario` vai no HEADER HTTP, NÃO no body
 - **Validação do usuário**: é um GET simples na API de users passando o ID
@@ -236,7 +330,7 @@ curl -X POST http://18.230.76.235:5002/post \
        |
        | HTTP Request (Header: usuario)
        v
-[API de Posts (Flask/Python)] ──── porta 5002
+[API de Posts (Flask/Python)] ──── porta livre (ex: 8081)
        |                |
        |                | GET /users/{id} (valida usuário)
        |                v

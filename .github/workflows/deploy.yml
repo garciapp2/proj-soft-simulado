@@ -50,7 +50,15 @@ jobs:
           key: ${{ secrets.KEY_TEST }}
           port: 22
           script: |
+            echo "=== CONTAINERS RODANDO ==="
+            docker ps --format "table {{.Names}}\t{{.Ports}}\t{{.Image}}"
+            echo "=== REDES ==="
+            docker network ls
+            echo "=========================="
             docker stop posts-api || true
             docker rm --force posts-api || true
             docker pull ${{ secrets.DOCKER_USER }}/posts-api:${{ github.sha }}
             docker run -d -p 8081:5000 -e MONGO_URL=${{ secrets.MONGO_URL }} -e USER_API_URL=${{ secrets.USER_API_URL }} --network=rede --name posts-api ${{ secrets.DOCKER_USER }}/posts-api:${{ github.sha }}
+            echo "=== LOGS DO CONTAINER ==="
+            sleep 3
+            docker logs posts-api
