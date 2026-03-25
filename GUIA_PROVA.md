@@ -223,6 +223,9 @@ curl -X POST http://18.230.76.235:5002/post \
 - **Variáveis de ambiente**: usar `os.environ.get('NOME', 'valor_padrao')`
 - **Docker network**: todos os containers precisam estar na mesma rede (`rede`)
 - **Nomes DNS no Docker**: dentro da rede Docker, containers se comunicam pelo NOME do container (não por localhost)
+- **Se o curl dá timeout**: a porta NÃO está liberada no Security Group da AWS. Ir em EC2 → Instances → Security → Security Group → Edit inbound rules → Add rule → Custom TCP, porta desejada, Source 0.0.0.0/0
+- **Portas comuns já abertas na AWS**: 22 (SSH), 80 (HTTP), 8080. Usar porta 80 se possível para evitar ter que abrir no Security Group
+- **Porta 80 é padrão HTTP**: se mapear `-p 80:5000`, acessa sem colocar porta na URL (ex: `http://IP/post`)
 
 ---
 
